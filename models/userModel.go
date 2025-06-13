@@ -19,17 +19,17 @@ type User struct {
 	User_id       *string            `json:"user_id"`
 }
 
-// GetID implements mgm.Model.
-func (u *User) GetID() interface{} {
-	panic("unimplemented")
-}
+// // GetID implements mgm.Model.
+// func (u *User) GetID() interface{} {
+// 	panic("unimplemented")
+// }
 
-// PrepareID implements mgm.Model.
-func (u *User) PrepareID(id interface{}) (interface{}, error) {
-	panic("unimplemented")
-}
+// // PrepareID implements mgm.Model.
+// func (u *User) PrepareID(id interface{}) (interface{}, error) {
+// 	panic("unimplemented")
+// }
 
-// SetID implements mgm.Model.
-func (u *User) SetID(id interface{}) {
-	panic("unimplemented")
-}
+// // SetID implements mgm.Model.
+// func (u *User) SetID(id interface{}) {
+// 	panic("unimplemented")
+// }

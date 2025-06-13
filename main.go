@@ -21,6 +21,7 @@ func main(){
 	
 	routes.AuthRoutes(router)
 	routes.UserRoutes(router)
+	routes.TripRoutes(router)
 
 
 
