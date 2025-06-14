@@ -55,16 +55,17 @@ func CreateTrip() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Could not find user ID in context"})
 			return
 		}
-		// 	ID 				primitive.ObjectID		`bson:"_id"`
-		// Trip_ID			*string					`json:"trip_id"`
-		// Name    		*string            		`json:"trip_name"`
-		// Description		*string					`json:"description"`
-		// Members			*[]string				`json:"members"`
-		// Creator_ID		*string					`json:"creator_id"`
-		// Invite_Code		*string					`json:"invite_code"`
-		// Created_At 		time.Time				`json:"created_at"`
 
-		// creatorID=c.GetString("uid")
+		// Get user's first and last name from context
+		firstName := c.GetString("first_name")
+		lastName := c.GetString("last_name")
+		if firstName == "" || lastName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "User's name information is missing"})
+			return
+		}
+
+		// Create member name in format firstname_lastname
+		memberName := firstName + "_" + lastName
 
 		fmt.Println("Creating new trip document")
 		trip.ID = primitive.NewObjectID()
@@ -72,7 +73,15 @@ func CreateTrip() gin.HandlerFunc {
 		trip.Trip_ID = &trip_id
 		//name given in json
 		//description given in json
-		//member given in json
+
+		// Initialize members array if it's nil
+		if trip.Members == nil {
+			trip.Members = &[]string{}
+		}
+
+		// Add creator as first member
+		*trip.Members = append(*trip.Members, memberName)
+
 		trip.Creator_ID = &creatorID
 
 		// Create invite code safely
@@ -93,6 +102,21 @@ func CreateTrip() gin.HandlerFunc {
 		if err != nil {
 			fmt.Println("Error inserting trip:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create trip: " + err.Error()})
+			return
+		}
+
+		// Create link for the creator
+		linkMember := models.Member{
+			ID:      primitive.NewObjectID(),
+			Trip_ID: trip.Trip_ID,
+			Name:    &memberName,
+			Uid:     &creatorID,
+		}
+		_, err = linkedMemberCollection.InsertOne(ctx, linkMember)
+		if err != nil {
+			// If linking fails, we should probably delete the trip
+			_, _ = tripCollection.DeleteOne(ctx, bson.M{"_id": trip.ID})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to link creator as member: " + err.Error()})
 			return
 		}
 
