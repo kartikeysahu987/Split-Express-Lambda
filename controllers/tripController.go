@@ -405,6 +405,20 @@ func LinkMember() gin.HandlerFunc {
 			return
 		}
 
+		// Step 5.1: Check if member is linked with any username in this trip
+		var existingMemberLink models.Member
+		err = linkedMemberCollection.FindOne(ctx, bson.M{
+			"trip_id": trip.Trip_ID,
+			"uid":     uid,
+		}).Decode(&existingMemberLink)
+		if err == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "You have already linked with another member in this trip"})
+			return
+		} else if err != mongo.ErrNoDocuments {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking existing member link: " + err.Error()})
+			return
+		}
+
 		// Step 6: Create and insert new link
 		linkMember := models.Member{
 			ID:      primitive.NewObjectID(),
@@ -420,14 +434,6 @@ func LinkMember() gin.HandlerFunc {
 
 		// Step 7: Return success with updated member status
 		free, notFree := helpers.GetAllFreeMembers(*trip.Trip_ID, *trip.Members)
-		// do:=true
-		for i := 0; i < len(notFree); i++ {
-			if notFree[i] == requestBody.MemberName {
-				// do=false
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Member is already linked"})
-				return
-			}
-		}
 		c.JSON(http.StatusOK, gin.H{
 			"message":          "Member linked successfully",
 			"trip_id":          trip.Trip_ID,
