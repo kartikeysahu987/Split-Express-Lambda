@@ -342,12 +342,6 @@ func GetAllNotFreeMemberOnInviteCode() gin.HandlerFunc {
 	}
 }
 
-func getUidViaCasualName() gin.HandlerFunc {
-	return func(c *gin.Context) {
-
-	}
-}
-
 func LinkMember() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
@@ -598,7 +592,6 @@ func GetAllTransaction() gin.HandlerFunc {
 		// Step 1: Bind request JSON
 		var requestBody struct {
 			TripId string `json:"trip_id" binding:"required"`
-			// MemberName string `json:"name" binding:"required"`
 		}
 		if err := c.BindJSON(&requestBody); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
@@ -612,78 +605,31 @@ func GetAllTransaction() gin.HandlerFunc {
 			return
 		}
 
+		// Create match stage to filter by trip_id
 		matchStage := bson.D{
 			{"$match", bson.D{
 				{"trip_id", requestBody.TripId},
 			}},
 		}
 
-		recordPerPage, err := strconv.Atoi(c.Query("recordPerPage"))
-		if err != nil || recordPerPage < 1 {
-			recordPerPage = 10
-		}
-
-		page, err := strconv.Atoi(c.Query("page"))
-		if err != nil || page < 1 {
-			page = 1
-		}
-
-		startIndex := (page - 1) * recordPerPage
-
-		// Create aggregation pipeline
-		//its like a filter to make where
-		// here match means where
-		// matchStage := bson.D{{Key: "$match", Value: bson.D{{}}}}
-
-		groupStage := bson.D{
-			{
-				Key: "$group",
-				Value: bson.D{
-					{Key: "_id", Value: "null"},
-					{Key: "total_count", Value: bson.D{{Key: "$sum", Value: 1}}},
-					{Key: "data", Value: bson.D{{Key: "$push", Value: "$$ROOT"}}},
-				},
-			},
-		}
-		projectStage := bson.D{
-			{
-				Key: "$project",
-				Value: bson.D{
-					{Key: "_id", Value: 0},
-					{Key: "total_count", Value: 1},
-					{Key: "user_items", Value: bson.D{
-						{Key: "$slice", Value: bson.A{"$data", startIndex, recordPerPage}},
-					}},
-				},
-			},
-		}
-
-		// Execute aggregation
-		result, err := transactionCollection.Aggregate(ctx, mongo.Pipeline{
-			matchStage, groupStage, projectStage,
-		})
+		// Execute aggregation to get all transactions
+		result, err := transactionCollection.Aggregate(ctx, mongo.Pipeline{matchStage})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching users: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching transactions: " + err.Error()})
 			return
 		}
 
 		// Decode results
-		var allUsers []bson.M
-		if err = result.All(ctx, &allUsers); err != nil {
+		var transactions []bson.M
+		if err = result.All(ctx, &transactions); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding results: " + err.Error()})
 			return
 		}
 
-		if len(allUsers) == 0 {
-			c.JSON(http.StatusOK, gin.H{
-				"total_count": 0,
-				"user_items":  []bson.M{},
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, allUsers[0])
-
+		c.JSON(http.StatusOK, gin.H{
+			"total_count":  len(transactions),
+			"transactions": transactions,
+		})
 	}
 }
 
