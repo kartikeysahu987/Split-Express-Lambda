@@ -704,3 +704,46 @@ func GetSettlements() gin.HandlerFunc {
 		})
 	}
 }
+
+func GetCasualNameByUID() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		var request struct {
+			TripID string `json:"trip_id" binding:"required"`
+		}
+
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+
+		// Get uid from context (set by authentication middleware)
+		uid := c.GetString("uid")
+		if uid == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Could not find user ID in context"})
+			return
+		}
+
+		// Find the member in LinkedMembers collection
+		var member models.Member
+		err := linkedMemberCollection.FindOne(ctx, bson.M{
+			"trip_id": request.TripID,
+			"uid":     uid,
+		}).Decode(&member)
+
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Member not found in this trip"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error finding member: " + err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"casual_name": member.Name,
+		})
+	}
+}

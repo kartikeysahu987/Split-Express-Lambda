@@ -19,7 +19,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
 )
-//Here we get a instanve in mongoDb for use 
+
+// Here we get a instanve in mongoDb for use
 var userCollection *mongo.Collection = database.OpenCollection(database.Client, "user")
 var validate = validator.New()
 
@@ -44,12 +45,13 @@ func VerifyPassword(userPassword string, foundUserPassword string) (passwordIsva
 	// passwordIsvalid = true
 	// return passwordIsvalid, "password and email is correct "
 
-	if  err := bcrypt.CompareHashAndPassword([]byte(foundUserPassword), []byte(userPassword)) ;err!=nil{
-		return false ,"email and password is incorrect "
+	if err := bcrypt.CompareHashAndPassword([]byte(foundUserPassword), []byte(userPassword)); err != nil {
+		return false, "email and password is incorrect "
 	}
-	return true,"password and email is correct "
+	return true, "password and email is correct "
 }
-// here we bind whole user but we use only email and password so only this two are required 
+
+// here we bind whole user but we use only email and password so only this two are required
 func Login() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
@@ -57,16 +59,16 @@ func Login() gin.HandlerFunc {
 
 		var user models.User
 		var foundUser models.User
-		// here the context c store all the user struct data which is present in body (simply) jo json hm bhejte hai vo store krta 
-		//hai bind json and idhr user structure jaise store krega 
-		// here from c we bind all the json in user 
+		// here the context c store all the user struct data which is present in body (simply) jo json hm bhejte hai vo store krta
+		//hai bind json and idhr user structure jaise store krega
+		// here from c we bind all the json in user
 		if err := c.BindJSON(&user); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 			return
 		}
-		// Here we find the user with the email as user email 
-		//here we find user and bind it with founduser 
-		// bson.M map the key and value it just find the req item in database 
+		// Here we find the user with the email as user email
+		//here we find user and bind it with founduser
+		// bson.M map the key and value it just find the req item in database
 		err := userCollection.FindOne(ctx, bson.M{"email": user.Email}).Decode(&foundUser)
 		if err != nil {
 			if err == mongo.ErrNoDocuments {
@@ -82,13 +84,13 @@ func Login() gin.HandlerFunc {
 			return
 		}
 
-		// here in user we have a verify password 
+		// here in user we have a verify password
 		passwordIsValid, msg := VerifyPassword(*user.Password, *foundUser.Password)
 		if !passwordIsValid {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": msg})
 			return
 		}
-		//here we generate refreshtoken and token 
+		//here we generate refreshtoken and token
 		token, refreshToken := helpers.GenerateAllTokens(*foundUser.Email, *foundUser.First_Name, *foundUser.Last_Name, *foundUser.User_type, *foundUser.User_id)
 
 		// Update tokens in database
@@ -100,7 +102,7 @@ func Login() gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching updated user data: " + err.Error()})
 			return
 		}
-		// the response you will receive after succefull login 
+		// the response you will receive after succefull login
 		c.JSON(http.StatusOK, gin.H{
 			"message":       "Login successful",
 			"user":          foundUser,
@@ -115,12 +117,12 @@ func Signup() gin.HandlerFunc {
 		defer cancel()
 
 		var user models.User
-		//bind everything to user 
+		//bind everything to user
 		if err := c.BindJSON(&user); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 			return
 		}
-		//validate that everything with validation is present or not 
+		//validate that everything with validation is present or not
 		validationErr := validate.Struct(user)
 		if validationErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Validation error: " + validationErr.Error()})
@@ -133,7 +135,6 @@ func Signup() gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error while checking email: " + err.Error()})
 			return
 		}
-
 
 		if count > 0 {
 			c.JSON(http.StatusConflict, gin.H{"error": "This email is already registered"})
@@ -159,7 +160,7 @@ func Signup() gin.HandlerFunc {
 		// Set user metadata
 		user.Created_at, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
 
-		//get a new object as id 
+		//get a new object as id
 		user.ID = primitive.NewObjectID()
 		//set that userid in hex for uid
 		uid := user.ID.Hex()
@@ -184,11 +185,11 @@ func Signup() gin.HandlerFunc {
 	}
 }
 
-//To learn go mongo db aggragrate function 
+// To learn go mongo db aggragrate function
 func GetUsers() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		//only admin used api so admin permission to out 	
+		//only admin used api so admin permission to out
 		if err := helpers.CheckUserType(c, "ADMIN"); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -211,8 +212,8 @@ func GetUsers() gin.HandlerFunc {
 		startIndex := (page - 1) * recordPerPage
 
 		// Create aggregation pipeline
-		//its like a filter to make where 
-		// here match means where 
+		//its like a filter to make where
+		// here match means where
 		matchStage := bson.D{{Key: "$match", Value: bson.D{{}}}}
 
 		groupStage := bson.D{
