@@ -12,6 +12,5 @@ type Settle struct{
 	PayerName		*string					`json:"payer_name"`
 	ReciverName		*string					`json:"reciever_name"`
 	Amount			*string					`json:"amount"`
-	// Description		*string					`json:"description"`
 	Created_At		time.Time				`json:"created_at"`
 }

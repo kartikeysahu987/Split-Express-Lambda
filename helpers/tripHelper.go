@@ -87,10 +87,9 @@ func CalculateSettlements(transactions []models.Transaction) []Settlement {
 			continue // Skip if amount can't be parsed
 		}
 
-		if *t.Type == "Paid" {
-			balances[*t.PayerName] -= amount
-			balances[*t.ReciverName] += amount
-		}
+		balances[*t.PayerName] -= amount
+		balances[*t.ReciverName] += amount
+
 	}
 
 	// Separate debtors and creditors
