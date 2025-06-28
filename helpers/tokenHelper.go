@@ -84,7 +84,7 @@ func GenerateAllTokens(email, first_name, last_name, user_type, user_id string) 
 
 		//standard syntax 
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Local().Add(24 * time.Hour).Unix(), // token expires in 1 day
+			ExpiresAt: time.Now().Local().Add( 720 * time.Hour).Unix(), // token expires in 1 day
 			// IssuedAt:  time.Now().Unix(),
 		},
 	}
