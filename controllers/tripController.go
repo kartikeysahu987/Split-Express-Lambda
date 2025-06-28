@@ -212,86 +212,76 @@ func GetAllTrip() gin.HandlerFunc {
 
 func GetAllMyTrip() gin.HandlerFunc {
 	return func(c *gin.Context) {
-
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 		defer cancel()
 
+		// Get user ID from context
 		uid := c.GetString("uid")
-
-		matchStage := bson.D{
-			{"$match", bson.D{
-				{"creator_id", uid},
-			}},
+		if uid == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+			return
 		}
 
-		recordPerPage, err := strconv.Atoi(c.Query("recordPerPage"))
-		if err != nil || recordPerPage < 1 {
-			recordPerPage = 10
-		}
-
-		page, err := strconv.Atoi(c.Query("page"))
-		if err != nil || page < 1 {
-			page = 1
-		}
-
-		startIndex := (page - 1) * recordPerPage
-
-		// Create aggregation pipeline
-		//its like a filter to make where
-		// here match means where
-		// matchStage := bson.D{{Key: "$match", Value: bson.D{{}}}}
-
-		groupStage := bson.D{
-			{
-				Key: "$group",
-				Value: bson.D{
-					{Key: "_id", Value: "null"},
-					{Key: "total_count", Value: bson.D{{Key: "$sum", Value: 1}}},
-					{Key: "data", Value: bson.D{{Key: "$push", Value: "$$ROOT"}}},
-				},
-			},
-		}
-		projectStage := bson.D{
-			{
-				Key: "$project",
-				Value: bson.D{
-					{Key: "_id", Value: 0},
-					{Key: "total_count", Value: 1},
-					{Key: "user_items", Value: bson.D{
-						{Key: "$slice", Value: bson.A{"$data", startIndex, recordPerPage}},
-					}},
-				},
-			},
-		}
-
-		// Execute aggregation
-		result, err := tripCollection.Aggregate(ctx, mongo.Pipeline{
-			matchStage, groupStage, projectStage,
-		})
+		// Step 1: Find all trips where user is the creator
+		var createdTrips []models.Trip
+		cursor, err := tripCollection.Find(ctx, bson.M{"creator_id": uid})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching users: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching created trips: " + err.Error()})
+			return
+		}
+		if err = cursor.All(ctx, &createdTrips); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding created trips: " + err.Error()})
 			return
 		}
 
-		// Decode results
-		var allUsers []bson.M
-		if err = result.All(ctx, &allUsers); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding results: " + err.Error()})
+		// Step 2: Find all trips where user is linked as a member
+		var linkedMembers []models.Member
+		cursor, err = linkedMemberCollection.Find(ctx, bson.M{"uid": uid})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching linked members: " + err.Error()})
+			return
+		}
+		if err = cursor.All(ctx, &linkedMembers); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding linked members: " + err.Error()})
 			return
 		}
 
-		if len(allUsers) == 0 {
-			c.JSON(http.StatusOK, gin.H{
-				"total_count": 0,
-				"user_items":  []bson.M{},
-			})
-			return
+		// Step 3: Get trip IDs from linked members
+		var linkedTripIDs []string
+		for _, member := range linkedMembers {
+			if member.Trip_ID != nil {
+				linkedTripIDs = append(linkedTripIDs, *member.Trip_ID)
+			}
 		}
 
-		c.JSON(http.StatusOK, allUsers[0])
+		// Step 4: Find all trips where user is linked (excluding trips they created)
+		var linkedTrips []models.Trip
+		if len(linkedTripIDs) > 0 {
+			// Create filter to exclude trips where user is creator
+			filter := bson.M{
+				"trip_id":    bson.M{"$in": linkedTripIDs},
+				"creator_id": bson.M{"$ne": uid}, // Exclude trips where user is creator
+			}
 
+			cursor, err = tripCollection.Find(ctx, filter)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching linked trips: " + err.Error()})
+				return
+			}
+			if err = cursor.All(ctx, &linkedTrips); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding linked trips: " + err.Error()})
+				return
+			}
+		}
+
+		// Step 5: Combine all trips
+		allTrips := append(createdTrips, linkedTrips...)
+
+		c.JSON(http.StatusOK, gin.H{
+			"total_count": len(allTrips),
+			"trips":       allTrips,
+		})
 	}
-
 }
 
 func GetAllNotFreeMemberOnInviteCode() gin.HandlerFunc {
