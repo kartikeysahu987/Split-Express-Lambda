@@ -5,6 +5,7 @@ import (
 	"connection/helpers"
 	"connection/models"
 	"context"
+	"math/rand"
 	"strconv"
 
 	// "fmt"
@@ -22,6 +23,7 @@ import (
 
 // Here we get a instanve in mongoDb for use
 var userCollection *mongo.Collection = database.OpenCollection(database.Client, "user")
+var otpCollection *mongo.Collection = database.OpenCollection(database.Client, "otp")
 var validate = validator.New()
 
 func HashPassword(password string) string {
@@ -289,4 +291,163 @@ func GetUser() gin.HandlerFunc {
 
 	}
 
+}
+
+func GetOTP() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		var otpRequest models.OTPRequest
+
+		// Bind JSON request
+		if err := c.BindJSON(&otpRequest); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+
+		// Validate email
+		validationErr := validate.Struct(otpRequest)
+		if validationErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Validation error: " + validationErr.Error()})
+			return
+		}
+
+		// Check if user exists
+		var foundUser models.User
+		err := userCollection.FindOne(ctx, bson.M{"email": otpRequest.Email}).Decode(&foundUser)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusNotFound, gin.H{"error": "User not found with this email"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error: " + err.Error()})
+			}
+			return
+		}
+
+		// Generate 6-digit OTP
+		rand.Seed(time.Now().UnixNano())
+		otp := strconv.Itoa(rand.Intn(900000) + 100000) // Generates number between 100000-999999
+
+		// Create OTP record
+		otpRecord := models.OTP{
+			ID:        primitive.NewObjectID(),
+			Email:     otpRequest.Email,
+			OTP:       otp,
+			ExpiresAt: time.Now().Add(10 * time.Minute), // OTP expires in 10 minutes
+			CreatedAt: time.Now(),
+			Used:      false,
+		}
+
+		// Delete any existing OTP for this email
+		_, err = otpCollection.DeleteMany(ctx, bson.M{"email": otpRequest.Email})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error clearing existing OTP: " + err.Error()})
+			return
+		}
+
+		// Insert new OTP
+		_, err = otpCollection.InsertOne(ctx, otpRecord)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving OTP: " + err.Error()})
+			return
+		}
+
+		// Send OTP via email
+		err = helpers.SendOTPEmail(otpRequest.Email, otp)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error sending OTP email: " + err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "OTP sent successfully to your email",
+			"email":   otpRequest.Email,
+		})
+	}
+}
+
+func VerifyOTP() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		var otpVerification models.OTPVerification
+
+		// Bind JSON request
+		if err := c.BindJSON(&otpVerification); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+
+		// Validate request
+		validationErr := validate.Struct(otpVerification)
+		if validationErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Validation error: " + validationErr.Error()})
+			return
+		}
+
+		// Find OTP record
+		var otpRecord models.OTP
+		err := otpCollection.FindOne(ctx, bson.M{
+			"email": otpVerification.Email,
+			"otp":   otpVerification.OTP,
+			"used":  false,
+		}).Decode(&otpRecord)
+
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid OTP or OTP already used"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error: " + err.Error()})
+			}
+			return
+		}
+
+		// Check if OTP is expired
+		if time.Now().After(otpRecord.ExpiresAt) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "OTP has expired"})
+			return
+		}
+
+		// Mark OTP as used
+		_, err = otpCollection.UpdateOne(
+			ctx,
+			bson.M{"_id": otpRecord.ID},
+			bson.M{"$set": bson.M{"used": true}},
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating OTP status: " + err.Error()})
+			return
+		}
+
+		// Get user data
+		var foundUser models.User
+		err = userCollection.FindOne(ctx, bson.M{"email": otpVerification.Email}).Decode(&foundUser)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching user data: " + err.Error()})
+			return
+		}
+
+		// Generate tokens
+		token, refreshToken := helpers.GenerateAllTokens(*foundUser.Email, *foundUser.First_Name, *foundUser.Last_Name, *foundUser.User_type, *foundUser.User_id)
+
+		// Update tokens in database
+		helpers.UpdateAllTokens(token, refreshToken, *foundUser.User_id)
+
+		// Fetch updated user data
+		err = userCollection.FindOne(ctx, bson.M{"user_id": foundUser.User_id}).Decode(&foundUser)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching updated user data: " + err.Error()})
+			return
+		}
+
+		// Return success response with tokens (same as login)
+		c.JSON(http.StatusOK, gin.H{
+			"message":       "OTP verified successfully",
+			"user":          foundUser,
+			"token":         token,
+			"refresh_token": refreshToken,
+		})
+	}
 }
