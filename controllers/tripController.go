@@ -212,69 +212,68 @@ func GetAllTrip() gin.HandlerFunc {
 
 func GetAllMyTrip() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 		defer cancel()
 
-		// Get user ID from context
 		uid := c.GetString("uid")
 		if uid == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
 			return
 		}
 
-		// Step 1: Find all trips where user is the creator
+		fmt.Println("GetAllMyTrip: User ID:", uid)
+
+		// Step 1: Get trips created by the user
 		var createdTrips []models.Trip
-		cursor, err := tripCollection.Find(ctx, bson.M{"creator_id": uid})
+		createdCursor, err := tripCollection.Find(ctx, bson.M{"creator_id": uid})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching created trips: " + err.Error()})
 			return
 		}
-		if err = cursor.All(ctx, &createdTrips); err != nil {
+		if err = createdCursor.All(ctx, &createdTrips); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding created trips: " + err.Error()})
 			return
 		}
 
-		// Step 2: Find all trips where user is linked as a member
+		// Step 2: Get member links where user is a member
 		var linkedMembers []models.Member
-		cursor, err = linkedMemberCollection.Find(ctx, bson.M{"uid": uid})
+		memberCursor, err := linkedMemberCollection.Find(ctx, bson.M{"uid": uid})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching linked members: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching member links: " + err.Error()})
 			return
 		}
-		if err = cursor.All(ctx, &linkedMembers); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding linked members: " + err.Error()})
+		if err = memberCursor.All(ctx, &linkedMembers); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding member links: " + err.Error()})
 			return
 		}
 
-		// Step 3: Get trip IDs from linked members
-		var linkedTripIDs []string
+		// Step 3: Extract trip IDs from linked members
+		linkedTripIDs := make([]string, 0)
 		for _, member := range linkedMembers {
 			if member.Trip_ID != nil {
 				linkedTripIDs = append(linkedTripIDs, *member.Trip_ID)
 			}
 		}
 
-		// Step 4: Find all trips where user is linked (excluding trips they created)
+		// Step 4: Fetch linked trips (exclude trips already created by the user)
 		var linkedTrips []models.Trip
 		if len(linkedTripIDs) > 0 {
-			// Create filter to exclude trips where user is creator
 			filter := bson.M{
 				"trip_id":    bson.M{"$in": linkedTripIDs},
-				"creator_id": bson.M{"$ne": uid}, // Exclude trips where user is creator
+				"creator_id": bson.M{"$ne": uid},
 			}
-
-			cursor, err = tripCollection.Find(ctx, filter)
+			linkedCursor, err := tripCollection.Find(ctx, filter)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching linked trips: " + err.Error()})
 				return
 			}
-			if err = cursor.All(ctx, &linkedTrips); err != nil {
+			if err = linkedCursor.All(ctx, &linkedTrips); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding linked trips: " + err.Error()})
 				return
 			}
 		}
 
-		// Step 5: Combine all trips
+		// Step 5: Combine and respond
 		allTrips := append(createdTrips, linkedTrips...)
 
 		c.JSON(http.StatusOK, gin.H{
