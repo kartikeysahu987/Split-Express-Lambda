@@ -126,6 +126,7 @@ func CreateTrip() gin.HandlerFunc {
 		c.JSON(http.StatusCreated, gin.H{
 			"message": "Trip created successfully",
 			"tripID":  insertResult.InsertedID,
+			"invite_code":trip.Invite_Code,
 		})
 	}
 }
@@ -377,6 +378,106 @@ func LinkMember() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
 			return
 		}
+
+		// Step 3: Find trip by invite code
+		var trip models.Trip
+		err := tripCollection.FindOne(ctx, bson.M{"invite_code": requestBody.InviteCode}).Decode(&trip)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusNotFound, gin.H{"error": "No trip found with this invite code"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error finding trip: " + err.Error()})
+			}
+			return
+		}
+
+		// Step 4: Check if member exists in trip members
+		memberExists := false
+		if trip.Members != nil {
+			for _, member := range *trip.Members {
+				if member == requestBody.MemberName {
+					memberExists = true
+					break
+				}
+			}
+		}
+		if !memberExists {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Member not found in trip members"})
+			return
+		}
+
+		// Step 5: Check if member is already linked
+		var existingLink models.Member
+		err = linkedMemberCollection.FindOne(ctx, bson.M{
+			"trip_id": trip.Trip_ID,
+			"name":    requestBody.MemberName,
+		}).Decode(&existingLink)
+		if err == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Member is already linked"})
+			return
+		} else if err != mongo.ErrNoDocuments {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking existing link: " + err.Error()})
+			return
+		}
+
+		// Step 5.1: Check if member is linked with any username in this trip
+		var existingMemberLink models.Member
+		err = linkedMemberCollection.FindOne(ctx, bson.M{
+			"trip_id": trip.Trip_ID,
+			"uid":     uid,
+		}).Decode(&existingMemberLink)
+		if err == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "You have already linked with another member in this trip"})
+			return
+		} else if err != mongo.ErrNoDocuments {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking existing member link: " + err.Error()})
+			return
+		}
+
+		// Step 6: Create and insert new link
+		linkMember := models.Member{
+			ID:      primitive.NewObjectID(),
+			Trip_ID: trip.Trip_ID,
+			Name:    &requestBody.MemberName,
+			Uid:     &uid,
+		}
+		_, err = linkedMemberCollection.InsertOne(ctx, linkMember)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert linked member: " + err.Error()})
+			return
+		}
+
+		// Step 7: Return success with updated member status
+		free, notFree := helpers.GetAllFreeMembers(*trip.Trip_ID, *trip.Members)
+		c.JSON(http.StatusOK, gin.H{
+			"message":          "Member linked successfully",
+			"trip_id":          trip.Trip_ID,
+			"trip_name":        trip.Name,
+			"free_members":     free,
+			"not_free_members": notFree,
+			"total_members":    len(*trip.Members),
+			"total_free":       len(free),
+			"total_not_free":   len(notFree),
+		})
+	}
+}
+func AutomaticLinkMember() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		// Step 1: Bind request JSON
+		var requestBody struct {
+			InviteCode string `json:"invite_code" binding:"required"`
+			MemberName string `json:"name" binding:"required"`
+			UserId     string `json:"uid" binding:"required"`
+		}
+		if err := c.BindJSON(&requestBody); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+
+		uid := requestBody.UserId
 
 		// Step 3: Find trip by invite code
 		var trip models.Trip

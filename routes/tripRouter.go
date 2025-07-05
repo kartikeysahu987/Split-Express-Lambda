@@ -15,6 +15,7 @@ func TripRoutes(incomingRoutes *gin.Engine) {
 	incomingRoutes.GET("trip/getallmytrip", controllers.GetAllMyTrip())
 	incomingRoutes.POST("trip/getmembers", controllers.GetAllNotFreeMemberOnInviteCode())
 	incomingRoutes.POST("trip/linkmember", controllers.LinkMember())
+	incomingRoutes.POST("trip/automaticlinkmember", controllers.AutomaticLinkMember())
 	incomingRoutes.POST("trip/pay", controllers.Pay())
 	incomingRoutes.POST("trip/settle", controllers.Settle())
 	incomingRoutes.POST("trip/getAllTransaction", controllers.GetAllTransaction())
