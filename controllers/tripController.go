@@ -20,6 +20,7 @@ import (
 var tripCollection *mongo.Collection = database.OpenCollection(database.Client, "trips")
 var linkedMemberCollection *mongo.Collection = database.OpenCollection(database.Client, "LinkedMembers")
 var transactionCollection *mongo.Collection = database.OpenCollection(database.Client, "transaction")
+var contactCollection *mongo.Collection = database.OpenCollection(database.Client, "contact")
 
 // var userCollection *mongo.Collection =database.OpenCollection(database.Client,"user")
 // Always add creator in members
@@ -733,6 +734,40 @@ func GetCasualNameByUID() gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"casual_name": member.Name,
+		})
+	}
+}
+
+func GetContactInfo() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req models.GetContact
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format: " + err.Error()})
+			return
+		}
+
+		// Validate request
+		if req.Contacts == nil || len(req.Contacts) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Contacts list cannot be empty"})
+			return
+		}
+
+		// Process the contact list
+		enrichedContacts, err := helpers.GetContactInfoHelper(req.Contacts)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process contacts: " + err.Error()})
+			return
+		}
+
+		// Respond with PostContact format
+		response := models.PostContact{
+			ContactsInfo: enrichedContacts,
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Contact information retrieved successfully",
+			"data":    response,
 		})
 	}
 }

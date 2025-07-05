@@ -20,4 +20,6 @@ func TripRoutes(incomingRoutes *gin.Engine) {
 	incomingRoutes.POST("trip/getAllTransaction", controllers.GetAllTransaction())
 	incomingRoutes.POST("trip/getsettlements", controllers.GetSettlements())
 	incomingRoutes.POST("trip/getcausualnamebyuid", controllers.GetCasualNameByUID())
+	incomingRoutes.POST("trip/contactinfo", controllers.GetContactInfo())
+
 }
