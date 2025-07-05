@@ -42,7 +42,7 @@ func GetContactInfoHelper(contacts []models.Contact) ([]models.ContactInfo, erro
 		err := userCollection.FindOne(ctx, filter).Decode(&user)
 		if err != nil {
 			if err == mongo.ErrNoDocuments {
-				// log.Printf("No user found for phone: %s", *contact.ContactNo)
+				log.Printf("No user found for phone: %s", *contact.ContactNo)
 				continue
 			}
 			log.Printf("Error querying user for phone %s: %v", *contact.ContactNo, err)
