@@ -2,7 +2,8 @@ package database
 
 import (
 	"context"
-	"fmt"
+	"time"
+	// "fmt"
 	"log"
 	"os"
 
@@ -13,47 +14,38 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func connection_database() *mongo.Client {
+var Client *mongo.Client
 
+func init() {
+	// Load .env file (only works locally; on Lambda, env vars should be in console)
 	if err := godotenv.Load(); err != nil {
-		log.Println("Error loading .env file:", err)
-		// return
+		log.Println("⚠️ .env file not found, assuming AWS environment variables are set")
 	}
 
 	uri := os.Getenv("MONGODB_URI")
-
-	if uri == "" {
-		log.Fatal("MONGODB_URI environment variable is not set")
-		// return
-	}
-
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(uri))
-	if err != nil {
-		log.Fatal("Failed to connect to MongoDB:", err)
-	}
-
-	// Ping the database to verify connection
-	err = client.Ping(context.Background(), nil)
-	if err != nil {
-		log.Fatal("Failed to ping MongoDB:", err)
-	}
-
-	// result ,err :=client.ListDatabaseNames(context.Background(),bson.D{})
-
-	// if err!=nil{
-	// 	log.Fatal(err)
-	// }
-	// for _,db:= range result{
-	// 	fmt.Println(db)
+	// if uri == "" {
+	// 	log.Fatal("❌ MONGODB_URI not set")
 	// }
 
-	fmt.Println("Successfully connected to MongoDB")
+	// Connect with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	return client
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	if err != nil {
+		log.Fatalf("❌ MongoDB connection failed: %v", err)
+	}
 
+	// Ping to ensure connection
+	if err := client.Ping(ctx, nil); err != nil {
+		log.Fatalf("❌ MongoDB ping failed: %v", err)
+	}
+
+	Client = client
+	log.Println("✅ MongoDB connected successfully")
 }
 
-var Client *mongo.Client = connection_database()
+// var Client *mongo.Client = connection_database()
 
 func OpenCollection(client *mongo.Client, collectionName string) *mongo.Collection {
 	if err := godotenv.Load(); err != nil {
