@@ -72,6 +72,9 @@ func CreateTrip() gin.HandlerFunc {
 		trip.ID = primitive.NewObjectID()
 		trip_id := trip.ID.Hex()
 		trip.Trip_ID = &trip_id
+		isDeleted := false
+		trip.IsDeleted = &isDeleted
+
 		//name given in json
 		//description given in json
 
@@ -124,9 +127,9 @@ func CreateTrip() gin.HandlerFunc {
 		fmt.Println("Trip created successfully")
 		// 8. Return success with the new trip's ID
 		c.JSON(http.StatusCreated, gin.H{
-			"message": "Trip created successfully",
-			"tripID":  insertResult.InsertedID,
-			"invite_code":trip.Invite_Code,
+			"message":     "Trip created successfully",
+			"tripID":      insertResult.InsertedID,
+			"invite_code": trip.Invite_Code,
 		})
 	}
 }
@@ -615,6 +618,8 @@ func Pay() gin.HandlerFunc {
 		trans.Created_At = time.Now()
 		Type := "Paid"
 		trans.Type = &Type
+		isDeleted := false
+		trans.IsDeleted = &isDeleted
 		if trans.Description == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Can;t have payment without description"})
 			return
@@ -686,6 +691,8 @@ func Settle() gin.HandlerFunc {
 		trans.Created_At = time.Now()
 		Type := "Settle"
 		trans.Type = &Type
+		isDeleted := false
+		trans.IsDeleted = &isDeleted
 		// if trans.Description==nil{
 		// 	c.JSON(http.StatusBadRequest,gin.H{"error":"Can;t have payment without description"})
 		// 	return
@@ -726,7 +733,7 @@ func GetAllTransaction() gin.HandlerFunc {
 			return
 		}
 
-		// Create match stage to filter by trip_id
+		// Create match stage to filter by trip_id and exclude deleted transactions
 		matchStage := bson.D{
 			{"$match", bson.D{
 				{"trip_id", requestBody.TripId},
@@ -768,10 +775,14 @@ func GetSettlements() gin.HandlerFunc {
 			return
 		}
 
-		// Step 2: Get all transactions for the trip
+		// Step 2: Get all transactions for the trip (excluding deleted ones)
 		matchStage := bson.D{
 			{"$match", bson.D{
 				{"trip_id", requestBody.TripId},
+				{"$or", bson.A{
+					bson.D{{"is_deleted", bson.M{"$ne": true}}},
+					bson.D{{"is_deleted", bson.M{"$exists": false}}},
+				}},
 			}},
 		}
 
@@ -870,5 +881,146 @@ func GetContactInfo() gin.HandlerFunc {
 			"message": "Contact information retrieved successfully",
 			"data":    response,
 		})
+	}
+}
+func DeleteTrip() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		var request struct {
+			Trip_ID string `json:"trip_id" binding:"required"`
+		}
+
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+
+		uid := c.GetString("uid")
+		if uid == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+			return
+		}
+
+		var trip models.Trip
+		filter := bson.M{"trip_id": request.Trip_ID}
+
+		err := tripCollection.FindOne(ctx, filter).Decode(&trip)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Trip not found"})
+			return
+		}
+
+		// Compare pointers safely
+		if trip.Creator_ID == nil || *trip.Creator_ID != uid {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Only the creator can delete this trip"})
+			return
+		}
+
+		// Soft delete: update is_deleted field to true
+		update := bson.M{
+			"$set": bson.M{
+				"is_deleted": true,
+			},
+		}
+
+		_, err = tripCollection.UpdateOne(ctx, filter, update)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete trip"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Trip deleted successfully"})
+	}
+}
+func DeleteTransaction() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		var request struct {
+			TripID string `json:"trip_id" binding:"required"`
+			ID     string `json:"_id" binding:"required"` // Expecting string from frontend
+		}
+
+		fmt.Printf("Received request - TripID: %s, ID: %s\n", request.TripID, request.ID)
+
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+
+		uid := c.GetString("uid")
+		if uid == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+			return
+		}
+
+		// Convert transaction ID to ObjectID
+		fmt.Printf("Converting transaction ID: %s\n", request.ID)
+
+		// Try to convert as ObjectID first
+		txnID, err := primitive.ObjectIDFromHex(request.ID)
+		if err != nil {
+			fmt.Printf("Error converting as ObjectID: %v\n", err)
+			// If it fails, try to use it as a string directly
+			fmt.Printf("Trying to use ID as string: %s\n", request.ID)
+			// For now, let's still return an error, but we can modify this later
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid transaction ID format"})
+			return
+		}
+		fmt.Printf("Converted transaction ID: %s\n", txnID.Hex())
+
+		// 🔍 Get casual name of the user in this trip
+		var member models.Member
+		err = linkedMemberCollection.FindOne(ctx, bson.M{
+			"trip_id": request.TripID,
+			"uid":     uid,
+		}).Decode(&member)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusForbidden, gin.H{"error": "You are not a member of this trip"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error finding member: " + err.Error()})
+			}
+			return
+		}
+
+		// 🧾 Find the transaction (without is_deleted filter to find it regardless of status)
+		var txn models.Transaction
+		findFilter := bson.M{
+			"_id":     txnID,
+			"trip_id": request.TripID,
+		}
+
+		fmt.Printf("Looking for transaction with filter: %+v\n", findFilter)
+		err = transactionCollection.FindOne(ctx, findFilter).Decode(&txn)
+		if err != nil {
+			fmt.Printf("Error finding transaction: %v\n", err)
+			c.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
+			return
+		}
+		fmt.Printf("Found transaction: %+v\n", txn)
+
+		// 👮 Check if the current user is the payer
+		if txn.PayerName == nil || *txn.PayerName != *member.Name {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You are not the payer of this transaction"})
+			return
+		}
+
+		// 🗑️ Soft delete: set is_deleted = true
+		fmt.Printf("Updating transaction with filter: %+v\n", findFilter)
+		result, err := transactionCollection.UpdateOne(ctx, findFilter, bson.M{
+			"$set": bson.M{"is_deleted": true},
+		})
+		if err != nil {
+			fmt.Printf("Error updating transaction: %v\n", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete transaction"})
+			return
+		}
+		fmt.Printf("Update result: %+v\n", result)
+
+		c.JSON(http.StatusOK, gin.H{"message": "Transaction deleted successfully"})
 	}
 }

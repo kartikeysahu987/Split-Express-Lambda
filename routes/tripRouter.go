@@ -22,4 +22,6 @@ func TripRoutes(incomingRoutes *gin.Engine) {
 	incomingRoutes.POST("/trip/getsettlements", controllers.GetSettlements())
 	incomingRoutes.POST("/trip/getcausualnamebyuid", controllers.GetCasualNameByUID())
 	incomingRoutes.POST("/trip/contactinfo", controllers.GetContactInfo())
+	incomingRoutes.POST("/trip/deleteTrip", controllers.DeleteTrip())
+	incomingRoutes.POST("/trip/deleteTransaction", controllers.DeleteTransaction())
 }
